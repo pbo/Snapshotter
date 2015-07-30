@@ -1,0 +1,144 @@
+// (ctrl command option r)
+
+var folderURL = getFolderURL()
+getSelectedArtboards().forEach(function (artboard) {
+    updateScreenshotInArtboard(artboard, folderURL)
+})
+
+function getSelectedArtboards() {
+    function getArtboardOfLayer(layer) {
+        if (layer.isKindOfClass(MSArtboardGroup)) {
+            return layer
+        } else if (layer.isKindOfClass(MSLayer)) {
+            return getArtboardOfLayer(layer.parentGroup())
+        }
+    }
+
+    function unique(a) {
+        var seen = {};
+        return a.filter(function(item) {
+            return seen.hasOwnProperty(item) ? false : (seen[item] = true);
+        });
+    }
+
+    var selectedArtboards = []
+    for (var i = 0; i < context.selection.count(); i++) {
+        selectedArtboards.push(getArtboardOfLayer(context.selection.objectAtIndex(i)))
+    }
+
+    return unique(selectedArtboards)
+}
+
+function updateScreenshotInArtboard(artboard, sourcePathURL) {
+    var SCREEN_NAME = "[Screen]";
+    var SCREENSHOT_NAME = "Screenshot";
+    var SCREENSHOT_EXT = ".png";
+
+    var name = artboard.name();
+    var pageName = pageOfArtboard(artboard).name();
+    var pageLang = null
+    if (pageName.indexOf("[") >= 0 && pageName.indexOf("]") >= 0) {
+        pageLang = pageName.substring(pageName.indexOf("[") + 1, pageName.lastIndexOf("]"))
+    }
+
+    var screenshotMaskLayer = findSublayer(artboard, SCREEN_NAME);
+    if (screenshotMaskLayer == nil) {
+        showMessage("Can't find layer named " + SCREEN_NAME + " in artboard " + artboard.name());
+        return;
+    }
+
+    var newImage = null;
+    var fileName1 = name + SCREENSHOT_EXT;
+    var fileName2 = pageLang + "-" + name + SCREENSHOT_EXT;
+    var imageURL1 = sourcePathURL.URLByAppendingPathComponent(fileName1);
+    var imageURL2 = sourcePathURL.URLByAppendingPathComponent(fileName2);
+    if (NSFileManager.defaultManager().fileExistsAtPath(imageURL1.path()))) {
+        newImage = loadImageAtURL(imageURL1)
+    } else if (NSFileManager.defaultManager().fileExistsAtPath(imageURL2.path()))) {
+        newImage = loadImageAtURL(imageURL2)
+    }
+
+    if (newImage != null) {
+        var screenParent = screenshotMaskLayer.parentGroup()
+
+        // Remove all sublayers that are MSBitmapLayer
+        var layersToDelete = []
+        for (var i = 0; i < screenParent.layers().count(); i++) {
+            var layer = screenParent.layers().objectAtIndex(i);
+            if (layer.isKindOfClass(MSBitmapLayer)) {
+                layersToDelete.push(layer)
+            }
+        }
+        for (var i = 0; i < layersToDelete.length; i++) {
+            screenParent.removeLayer(layersToDelete[i])
+        }
+
+        // Insert new MSBitmapLayer
+        var imageLayer = addImgToGroup(screenParent, newImage, SCREENSHOT_NAME)
+        imageLayer.frame().setWidth(screenshotMaskLayer.frame().width());
+    } else {
+        showMessage("Can't read image file named " + fileName1 + " or " + fileName2);
+    }
+}
+
+function addImgToGroup(group, image, layerName) {
+    var doc = context.document;
+    var layer = MSBitmapLayer.new();
+    group.addLayers([layer]);
+    layer.setConstrainProportions(false);
+    layer.setRawImage_convertColourspace_collection(image, false, doc.documentData().images());
+    layer.setName(layerName);
+    layer.frame().setWidth(image.size().width);
+    layer.frame().setHeight(image.size().height);
+    layer.setConstrainProportions(true);
+    return layer
+}
+
+function findSublayer(parent, name) {
+    for (var i = 0; i < parent.layers().count(); i++) {
+        var layer = parent.layers().objectAtIndex(i);
+        if (layer.name() == name) {
+            return layer;
+        } else if (layer.isKindOfClass(MSLayerGroup)) {
+            var foundLayer = findSublayer(layer, name);
+            if (foundLayer != null) {
+                return foundLayer;
+            }
+        }
+    }
+    return null;
+}
+
+function getFolderURL() {
+    var openPanel = NSOpenPanel.openPanel()
+    openPanel.setCanChooseDirectories(true)
+    openPanel.setCanChooseFiles(false)
+    openPanel.setCanCreateDirectories(false)
+    openPanel.setTitle("Choose a source screenshots folder")
+    openPanel.setPrompt("Choose")
+    openPanel.runModal()
+    return openPanel.URLs().firstObject();
+}
+
+function loadImageAtURL(URL) {
+    return NSImage.alloc().initWithContentsOfURL(URL);
+}
+
+function showMessage(message) {
+    var alert = NSAlert.new()
+    alert.setMessageText(message)
+    alert.addButtonWithTitle("OK")
+    alert.runModal()
+}
+
+function pageOfArtboard(artboard) {
+    for (var i = 0; i < context.document.pages().count(); i++) {
+        var page = context.document.pages()[i];
+        for (var j = 0; j < page.artboards().count(); j++) {
+            if (page.artboards()[j] == artboard) {
+                return page;
+            }
+        }
+    }
+    return null;
+}
